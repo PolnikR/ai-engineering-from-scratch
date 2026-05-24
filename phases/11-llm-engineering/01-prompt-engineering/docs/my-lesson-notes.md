@@ -51,3 +51,6 @@ outperforms a 100K token prompt that is 10% signal.
 3. vystup sa da hodnotit cez criteria
 4. simulacia ukazuje workflow, nie skutocnu kvalitu modelov
 5. realne porovnanie pride az pri API volaniach
+
+torun skript $env:"api key"
+python C:\Users\polnikr\source\ai-engineering-examples\prompt_engineering.py
