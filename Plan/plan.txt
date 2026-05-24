@@ -1,0 +1,36 @@
+PHASE 11
+- 01 prompt engineering
+- 03 structured outputs
+- 05 context engineering
+- 06 rag
+- 09 function calling & tool use
+- 10 evaluation & testing llm applications
+- 13 building a production llm application
+- 14 model context protocol (mcp)
+
+PHASE 14
+- 01 the agent loop
+- 06 tool use and function calling
+- 24 agent observability
+- 26 failure modes
+- 30 eval-driven agent development
+- 38 verification gates
+
+PHASE 13
+- 01 the tool interface
+- 02 function calling deep dive
+- 05 tool schema design
+- 06 mcp fundamentals
+- 07 building an mcp server
+- 08 building an mcp client
+- 15 mcp security i
+
+PHASE 17
+- 13 llm observability stack selection
+- 14 prompt caching and semantic caching economics
+- 16 model routing as a cost-reduction primitive
+- 19 ai gateways
+- 22 load testing llm apis
+- 25 security
+- 27 finops for llms
+- 28 self-hosted serving selection
