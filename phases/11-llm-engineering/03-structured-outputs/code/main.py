@@ -6,8 +6,26 @@ def validate_schema(data, schema):
     _validate(data, schema, "", errors)
     return errors
 
+def _item_schema_type(schema, data, path, errors):
+    item_schema_type = schema.get("oneOf")
+    if item_schema_type is not None:
+        matches = 0
+
+        for candidate_schema in item_schema_type:
+            candidate_errors = []
+            _validate(data, candidate_schema, path, candidate_errors)
+
+            if len(candidate_errors) == 0:
+                matches += 1
+
+        if matches != 1:
+            errors.append(f"{path}: value must match exactly one schema")
+        
+        return
 
 def _validate(data, schema, path, errors):
+    _item_schema_type(schema, data, path, errors)
+
     schema_type = schema.get("type")
 
     if schema_type == "object":
@@ -165,6 +183,7 @@ def demonstrate_constrained_decoding():
         '{"product": "Sony", "price":',
         '{"product": "Sony", "price": 348',
         '{"product": "Sony", "price": 348}',
+        '{"service": "Consulting", "price": 100}' 
     ]
 
     print(f"\n  {'Partial JSON':<45} {'Valid Next Tokens'}")
@@ -187,13 +206,17 @@ def simulate_llm_extraction(text, schema, attempt=0):
     if "keyboard" in text.lower():
         return '{"product": "Keychron Q1", "price": 169.00, "in_stock": true, "categories": ["peripherals"]}'
 
+    if("consulting" in text.lower()):
+        return '{"service": "Consulting", "price": 100.00}' 
+    
     return '{"product": "Unknown", "price": 0, "in_stock": false}'
+
+    
 
 
 def extract_with_retry(text, schema, max_retries=3):
     for attempt in range(max_retries):
         raw = simulate_llm_extraction(text, schema, attempt)
-
         try:
             data = json.loads(raw)
         except json.JSONDecodeError as e:
@@ -220,6 +243,35 @@ PRODUCT_SCHEMA = {
     "required": ["product", "price", "in_stock"],
 }
 
+PRODUCT_SCHEMA_V2 = {
+    "type": "object",
+    "properties": {
+        "product": {"type": "string"},
+        "price": {"type": "string", "minimum": 2},
+        "in_stock": {"type": "boolean"},
+        
+    },
+    "required": ["price", "in_stock"],
+}
+
+
+
+SERVICE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "service": {"type": "string"},
+        "price": {"type": "number", "minimum": 0},
+    },
+    "required": ["service", "price"],
+}
+
+ITEM_SCHEMA = {
+    "oneOf": [
+        PRODUCT_SCHEMA,
+        SERVICE_SCHEMA,
+    ]
+}
+
 
 def run_schema_validation_demo():
     print("=" * 60)
@@ -228,6 +280,7 @@ def run_schema_validation_demo():
 
     test_cases = [
         ({"product": "Sony WH-1000XM5", "price": 348.0, "in_stock": True}, "Valid complete object"),
+        ({"service": "Consulting", "price": 100.0}, "Valid service object"),
         ({"product": "Test", "price": 10.0, "in_stock": True, "categories": ["audio"]}, "Valid with optional array"),
         ({"product": "Test", "price": -5.0, "in_stock": True}, "Negative price"),
         ({"product": "Test", "in_stock": True}, "Missing required field (price)"),
@@ -238,7 +291,7 @@ def run_schema_validation_demo():
     ]
 
     for data, label in test_cases:
-        errors = validate_schema(data, PRODUCT_SCHEMA)
+        errors = validate_schema(data, ITEM_SCHEMA)
         status = "PASS" if not errors else f"FAIL: {errors}"
         print(f"\n  {label}:")
         print(f"    Data:   {json.dumps(data) if isinstance(data, dict) else repr(data)}")
@@ -257,10 +310,16 @@ def run_schema_generation_demo():
         "categories": SchemaField(list, required=False),
         "rating": SchemaField(float, required=False, minimum=0, maximum=5),
     }
+    schema_fileds = {
+        "service": SchemaField(str),
+        "price": SchemaField(float, minimum=0),
+    }
 
-    schema = model_to_schema("Product", product_fields)
+    product_schema = model_to_schema("Product", product_fields)
+    service_schema = model_to_schema("Service", schema_fileds)
     print(f"\n  Generated schema from Python model:")
-    print(f"  {json.dumps(schema, indent=2)}")
+    print(f"  {json.dumps(product_schema, indent=2)}")
+    print(f"  {json.dumps(service_schema, indent=2)}")
 
     event_fields = {
         "title": SchemaField(str),
@@ -301,11 +360,12 @@ def run_extraction_pipeline_demo():
         "The new MacBook Pro 16-inch laptop costs $2499 but is completely sold out everywhere.",
         "I just bought a Keychron Q1 mechanical keyboard for $169 and it arrived today.",
         "This sentence contains no product information at all.",
+        "I offer consulting services for $100 per hour, but I don't have any products in stock.",
     ]
 
     for text in texts:
         print(f"\n  Input: {text[:70]}...")
-        result = extract_with_retry(text, PRODUCT_SCHEMA)
+        result = extract_with_retry(text, ITEM_SCHEMA)
         if result:
             print(f"  Output: {json.dumps(result)}")
         else:
@@ -373,10 +433,47 @@ def run_nested_schema_demo():
             for e in errors:
                 print(f"      - {e}")
 
+def schema_diff(schema1, schema2):
+    keys1 = set(schema1.keys())
+    keys2 = set(schema2.keys())
+    property_keys1 = set(schema1["properties"].keys())
+    property_keys2 = set(schema2["properties"].keys())
+
+    required_keys1 = set(schema1.get("required", []))
+    required_keys2 = set(schema2.get("required", []))
+
+    property_keys1_types = {k: v.get("type") for k, v in schema1["properties"].items()}
+    property_keys2_types = {k: v.get("type") for k, v in schema2["properties"].items()}
+
+    print(keys1)
+    print(property_keys1)
+
+    dif_keys = keys1 - keys2
+    print(f"Keys in schema1 but not in schema2: {dif_keys}")
+    dif_keys = keys2 - keys1
+    print(f"Keys in schema2 but not in schema1: {dif_keys}")
+
+    dif_property_keys = property_keys1 - property_keys2
+    print(f"Properties in schema1 but not in schema2: {dif_property_keys}")
+    dif_property_keys = property_keys2 - property_keys1
+    print(f"Properties in schema2 but not in schema1: {dif_property_keys}")
+
+    dif_required_keys = required_keys1 - required_keys2
+    print(f"Required properties in schema1 but not in schema2: {dif_required_keys}")
+    dif_required_keys = required_keys2 - required_keys1
+    print(f"Required properties in schema2 but not in schema1: {dif_required_keys}")
+
+    for key in property_keys1.intersection(property_keys2): 
+        type1 = property_keys1_types.get(key)
+        type2 = property_keys2_types.get(key)
+        if type1 != type2:
+            print(f"Property '{key}' has different types: '{type1}' vs '{type2}'")
 
 if __name__ == "__main__":
-    run_schema_validation_demo()
-    run_schema_generation_demo()
-    run_constrained_decoding_demo()
-    run_extraction_pipeline_demo()
-    run_nested_schema_demo()
+    # run_schema_validation_demo()
+    # run_schema_generation_demo()
+    # run_constrained_decoding_demo()
+    # run_extraction_pipeline_demo()
+    # run_nested_schema_demo()
+
+    schema_diff(PRODUCT_SCHEMA, PRODUCT_SCHEMA_V2)
