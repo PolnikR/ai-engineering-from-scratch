@@ -5,16 +5,16 @@ Text je diskrétny. Matematika je spojitá. Zakaždým, keď požiadate LLM o n�
 
 embedding je jedne dense vector (husto vyplneny vektor ) , zoznam desatinnych cisel, ktory reprezentuje vyznam textu.
 embeding model prevadza text na ciselny vektor
-slovo dense znamena , ze kazda dimenzia vektora nesie nejaku cast informacie o vyzname textu, co je rozdiel oproti sparese repretentaciam ako bag-of words, TF-IDF, kde je vacsina honosto nulova 
+slovo dense znamena , ze kazda dimenzia vektora nesie nejaku cast informacie o vyzname textu, co je rozdiel oproti sparese repretentaciam ako bag-of words, TF-IDF, kde je vacsina honodnot nulova 
 
 ### The Word2Vec Breakthrough
 Word2Vec -> neuronva siet predikuje slovo podla okolitych slov alebo naopak predikuje okolite slova podla daneho slova. Z toho sa v hidden layer vytvoria vektory , ktora zachytavaju vyznamove vztahy medzi slovami.Vektorova aritmetika vie zachytit vtahy medzi slovami ako muz/zen , kral/kralovan
-Word2Vec sa uci z kontextu , teda z toho , pri akych slovach sa dane slovo vyskytuje.Problemom je , ze Word2Vec da kazdemu slovu jedee fixny vector bez ohladu na kontext.(river bank - bank account)
+Word2Vec sa uci z kontextu , teda z toho , pri akych slovach sa dane slovo vyskytuje.Problemom je , ze Word2Vec da kazdemu slovu jeden fixny vector bez ohladu na kontext.(river bank - bank account)
 
 ### From Words to Sentences
 Word emebddings reprezentuju jednotlive tokeny alebo slova , ale produkcne systemy casto vyzaduju embedings pre cele vety , odseky alebo dokumenty. Preto vzniki prístupy , ktore z textu vačsieho nez jedno slovo vytvora jedne vektor
 
-Averaging -> zoberie vyznam vsktych slov vo vete a urobi ich priemer.Lacne, pouzitelne pre kratke texty , stratove. Najvacsi problem je, ze strati poradie slov. dog bties man = man bites dog
+Averaging -> zoberie vyznam vsektych slov vo vete a urobi ich priemer.Lacne, pouzitelne pre kratke texty , stratove. Najvacsi problem je, ze strati poradie slov. dog bties man = man bites dog
 
 CLS Token transformer ako BERT vytvorí špecialny [CLS] embedding pre cely vstup. Lepsie ako Averaging ale cls bol povodne trenovany pre predikciu next sentece nie pre similarity.
 
@@ -47,10 +47,10 @@ Dot product	Keď sú embeddingy už normalizované a chceš čo najrýchlejší 
 Euclidean distance	Pri clusteringu alebo nearest-neighbor problémoch v priestore.
 
 ### Vektorova databaza
-databaza optimalizovana pre ukladanie embedding vectorov a rychle haldanie najpodobnejsich vektorov. Pri velkom pocte dokumentov je brute force porovnavanie prilis pomale , prote sa pouziva ANN algoritmus ako HNSW , ktory hlada pribliznych najblizsisch susedov ovela rychlejsie, typicky v milisekundach 
+databaza optimalizovana pre ukladanie embedding vectorov a rychle hladanie najpodobnejsich vektorov. Pri velkom pocte dokumentov je brute force porovnavanie prilis pomale , prote sa pouziva ANN algoritmus ako HNSW , ktory hlada pribliznych najblizsisch susedov ovela rychlejsie, typicky v milisekundach 
 
 ### Chunking Strategies
-rozdelnie dlheho dokumente na mensie casti a vytvorenie ich embedings , pretoze jeden velky embeding pre cely dokument by zmiesal vela tem dokopy.
+rozdelnie dlheho dokumentu na mensie casti a vytvorenie ich embedings , pretoze jeden velky embeding pre cely dokument by zmiesal vela tem dokopy.
 Strategie : 
 Fixed-size chunking rozdelí text na rovnako veľké časti podľa počtu tokenov/slov, často s malým overlapom.
 
