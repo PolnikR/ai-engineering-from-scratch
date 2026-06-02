@@ -24,7 +24,7 @@ a v akom poradí budú informácie modelu predložené.
 
 ### The Problem
 
-Výskum ukazal , ze model vyhladava infomaracie  zaciatok a koniec dlheho contextu s takmer perfektnou presnostou , ale presnot klesa o 10-20 % pre informacie umietnene v strede (pozicie 40-70 % contextu).
+Výskum ukazal , ze model vyhladava infomaracie na zaciatku a konci dlheho contextu s takmer perfektnou presnostou , ale presnot klesa o 10-20 % pre informacie umietnene v strede (pozicie 40-70 % contextu).
 200k tokenove okno neznamena , ze pouizvanie 200 k okna je efektivne. Starostlivo spracovany 10k token context casto prekona 100K context. Context engineering je umenie a technika dodania správnych informácií AI modelu v správnom čase a správnej forme tak, aby model dosiahol čo najlepšie výsledky.
 
 Kazdy token , ktory vlozsis do okna nahradi token , ktory mohol niest hodnotnejsiu informaciu. Kazda nespravna definicia nastroja , kazda zastarana sprava v  historii konverzacie a kazdy kus zisakneho textu , ktory neodpoveda na otazku, sposobuje , ze model je pri danej ulohe o nieco horsi.
@@ -38,23 +38,23 @@ Context enginerring je  umenie rozdelovania tohto rozpoctu tak , aby sa maximali
 
 ### Lost-in-the-Middle
 Engineering implications:   
-    - najdolezitejsie informacie vzdy na  zaciatk (system prompt , kriticke instrukcie)
-    - aktualnu otazku a najrelevantnejsi kontext umiestni na koniec (moely maju tendenciu vnimat nedavne informacie)
+    - najdolezitejsie informacie vzdy na  zaciatok (system prompt , kriticke instrukcie)
+    - aktualnu otazku a najrelevantnejsi kontext umiestni na koniec (modely maju tendenciu vnimat nedavne informacie)
     - stred contextu povazuj za zonu s najnizsou hondnotou
-    - ak musis dat dolezitu informaciu do stredzu, zopakuj ju este raz na konci
+    - ak musis dat dolezitu informaciu do stredu, zopakuj ju este raz na konci
 
 
 ### Context Components
 
-**System prompt**: nastvi personu , obmedzenia a pravidal spravania. Tato cast ide ako prva a zostava rovnaka napriec jednotlivymi spravami. Claude Code pouizva priblizne 6k tokenov na systemovy prompt, vrataen definicii nastrojov , behavioralnych instrukcii. Udrzuj ho strucy. Kazde slovo v systemovom prompte sa opakuje pri kazdom api volani. 
+**System prompt**: nastavi personu , obmedzenia a pravidal spravania. Tato cast ide ako prva a zostava rovnaka napriec jednotlivymi spravami. Claude Code pouizva priblizne 6k tokenov na systemovy prompt, vratane definicii nastrojov , behavioralnych instrukcii. Udrzuj ho strucny. Kazde slovo v systemovom prompte sa opakuje pri kazdom api volani. 
 
 **Tool definitions**: kazdy nastroj prida 50-200 tokenov (meno , popis, parameter schema). Dynamicky vyber nastrojov -- zahrna vyber nastrojov relevantnych k danej poziadavke  -- moze zredukovat spotrebu o 60-80 %
 
-**Retrieved context**: ohodnot ka zdy ziskany dokument voci akutalnej otazke a vyrad dokuemnty , ktore su pod stanovenym prahom relevantnosti. Je lepsie mat 3 relevantne casti dokumentu ako 10 priemernych.
+**Retrieved context**: ohodnot kazdy ziskany dokument voci akutalnej otazke a vyrad dokuemnty , ktore su pod stanovenym prahom relevantnosti. Je lepsie mat 3 relevantne casti dokumentu ako 10 priemernych.
 
 **Tool pruning**: Klasifikuj zamer pouzivatelskej otazky a zahrn iba nastroje relevantne pre tento zamer. Otazka o kode neptrebuje kalendarove nastoje.Takto sa da znizit velkost definicii nastrojov z 8k na 1k tokenov.
 
-**Recursive summarization**: pri velmi slhych dokumentoch vytvaraj zhrnutie  v etapach. Najpr zhrn jednotlive sekcie potom vytvor zhrnutie tyhto zhrnuti.
+**Recursive summarization**: pri velmi dlhych dokumentoch vytvaraj zhrnutie  v etapach. Najpr zhrn jednotlive sekcie potom vytvor zhrnutie tyhto zhrnuti.
 
 ### Memory Systems
 
