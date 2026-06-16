@@ -1,3 +1,8 @@
+# Lesson: phases/11-llm-engineering/07-advanced-rag/docs/en.md
+# Implements advanced RAG retrieval primitives from scratch: BM25, RRF,
+# metadata filtering, HyDE, parent-child chunking, and Recall@k evaluation.
+# Formula references: Robertson & Zaragoza (2009) for BM25; Cormack et al.
+# (2009) for Reciprocal Rank Fusion.
 import math
 from collections import Counter
 
@@ -56,6 +61,18 @@ def cosine_similarity(a, b):
 def vector_search(query_embedding, stored_embeddings, top_k=5):
     scores = []
     for i, emb in enumerate(stored_embeddings):
+        sim = cosine_similarity(query_embedding, emb)
+        scores.append((i, sim))
+    scores.sort(key=lambda x: x[1], reverse=True)
+    return scores[:top_k]
+
+
+def vector_search_subset(query_embedding, stored_embeddings, allowed_indices, top_k=5):
+    allowed = set(allowed_indices)
+    scores = []
+    for i, emb in enumerate(stored_embeddings):
+        if i not in allowed:
+            continue
         sim = cosine_similarity(query_embedding, emb)
         scores.append((i, sim))
     scores.sort(key=lambda x: x[1], reverse=True)
@@ -129,6 +146,16 @@ def hybrid_search(query, chunks, vector_embeddings, vocab, idf, bm25_index, top_
     bm25_results = bm25_index.search(query, top_k=retrieval_pool)
     fused = reciprocal_rank_fusion([vec_results, bm25_results])
     return fused[:top_k]
+
+
+def metadata_filtered_vector_search(query, vector_embeddings, vocab, idf, metadata, filters=None, top_k=5):
+    query_emb = tfidf_embed(query, vocab, idf)
+    filters = filters or {}
+    allowed_indices = [
+        i for i, fields in enumerate(metadata)
+        if all(fields.get(key) == value for key, value in filters.items())
+    ]
+    return vector_search_subset(query_emb, vector_embeddings, allowed_indices, top_k=top_k)
 
 
 def rerank(query, candidates, chunks):
@@ -356,6 +383,223 @@ SAMPLE_DOCUMENTS = [
     within 5 minutes of any detected incident. Post-incident reports are
     published within 48 hours for any outage exceeding 15 minutes."""
 ]
+
+
+SOURCE_NAMES = ["refund", "product", "security", "api", "earnings", "uptime"]
+
+SOURCE_CATEGORIES = {
+    "refund": "billing",
+    "product": "product",
+    "security": "security",
+    "api": "api",
+    "earnings": "product",
+    "uptime": "product",
+}
+
+TEST_QUERIES = [
+    ("What is the refund policy for enterprise customers?", "refund"),
+    ("What was revenue last quarter?", "earnings"),
+    ("How is data encrypted?", "security"),
+    ("What are the API rate limits for enterprise?", "api"),
+    ("What happens if uptime falls below SLA?", "uptime"),
+]
+
+EVALUATION_DATASET = [
+    ("What is the refund policy for enterprise?", ["refund"]),
+    ("How long do enterprise customers have to request refunds?", ["refund"]),
+    ("What was Q3 revenue?", ["earnings"]),
+    ("How much revenue did enterprise contribute?", ["earnings"]),
+    ("How is customer data encrypted?", ["security"]),
+    ("Which TLS version protects data in transit?", ["security"]),
+    ("What are the API rate limits?", ["api"]),
+    ("What happens after exceeding the API limit?", ["api"]),
+    ("What uptime does Enterprise receive?", ["uptime"]),
+    ("How fast are incident updates posted?", ["uptime"]),
+]
+
+
+def build_sample_index(chunk_size=50, overlap=10):
+    chunks = []
+    metadata = []
+    for source_id, doc in enumerate(SAMPLE_DOCUMENTS):
+        source = SOURCE_NAMES[source_id]
+        for chunk in chunk_text(doc, chunk_size=chunk_size, overlap=overlap):
+            chunks.append(chunk)
+            metadata.append({
+                "source": source,
+                "category": SOURCE_CATEGORIES[source],
+            })
+
+    vocab = build_vocabulary(chunks)
+    idf = compute_idf(chunks, vocab)
+    embeddings = [tfidf_embed(chunk, vocab, idf) for chunk in chunks]
+    bm25 = BM25()
+    bm25.index(chunks)
+    return {
+        "chunks": chunks,
+        "metadata": metadata,
+        "vocab": vocab,
+        "idf": idf,
+        "embeddings": embeddings,
+        "bm25": bm25,
+    }
+
+
+def compare_retrievers_on_test_queries(index):
+    rows = []
+    for query, expected_source in TEST_QUERIES:
+        query_emb = tfidf_embed(query, index["vocab"], index["idf"])
+        vector_top = vector_search(query_emb, index["embeddings"], top_k=1)[0]
+        bm25_top = index["bm25"].search(query, top_k=1)[0]
+        hybrid_top = hybrid_search(
+            query,
+            index["chunks"],
+            index["embeddings"],
+            index["vocab"],
+            index["idf"],
+            index["bm25"],
+            top_k=1,
+        )[0]
+        rows.append({
+            "query": query,
+            "expected": expected_source,
+            "vector": index["metadata"][vector_top[0]]["source"],
+            "bm25": index["metadata"][bm25_top[0]]["source"],
+            "hybrid": index["metadata"][hybrid_top[0]]["source"],
+        })
+    return rows
+
+
+def count_top1_wins(rows):
+    wins = {"vector": 0, "bm25": 0, "hybrid": 0}
+    for row in rows:
+        for method in wins:
+            if row[method] == row["expected"]:
+                wins[method] += 1
+    return wins
+
+
+def compare_direct_vs_hyde(index, queries=None, top_k=3):
+    rows = []
+    for query, expected_source in queries or TEST_QUERIES:
+        direct_emb = tfidf_embed(query, index["vocab"], index["idf"])
+        direct = vector_search(direct_emb, index["embeddings"], top_k=top_k)
+        hyde, hypothesis = hyde_search(query, index["embeddings"], index["vocab"], index["idf"], top_k=top_k)
+        rows.append({
+            "query": query,
+            "expected": expected_source,
+            "hypothesis": hypothesis,
+            "direct_hit": any(index["metadata"][idx]["source"] == expected_source for idx, _ in direct),
+            "hyde_hit": any(index["metadata"][idx]["source"] == expected_source for idx, _ in hyde),
+        })
+    return rows
+
+
+def parent_child_search_context(text, query, parent_size=100, child_size=30, top_k=3):
+    parents, children, child_to_parent = create_parent_child_chunks(
+        text,
+        parent_size=parent_size,
+        child_size=child_size,
+    )
+    child_vocab = build_vocabulary(children)
+    child_idf = compute_idf(children, child_vocab)
+    child_embeddings = [tfidf_embed(child, child_vocab, child_idf) for child in children]
+    query_emb = tfidf_embed(query, child_vocab, child_idf)
+    child_results = vector_search(query_emb, child_embeddings, top_k=top_k)
+    parent_ids = []
+    contexts = []
+    for child_idx, score in child_results:
+        parent_idx = child_to_parent[child_idx]
+        if parent_idx in parent_ids:
+            continue
+        parent_ids.append(parent_idx)
+        contexts.append({
+            "child_id": child_idx,
+            "parent_id": parent_idx,
+            "score": score,
+            "child": children[child_idx],
+            "parent": parents[parent_idx],
+        })
+    return contexts
+
+
+def expected_chunk_ids(index, expected_sources):
+    expected = set(expected_sources)
+    return [
+        i for i, fields in enumerate(index["metadata"])
+        if fields["source"] in expected
+    ]
+
+
+def evaluate_advanced_retrievers(index, dataset=None, ks=(3, 5, 10)):
+    dataset = dataset or EVALUATION_DATASET
+    metrics = {
+        "vector": {},
+        "bm25": {},
+        "hybrid": {},
+        "hybrid_rerank": {},
+    }
+
+    for k in ks:
+        vector_queries = []
+        bm25_queries = []
+        hybrid_queries = []
+        rerank_queries = []
+
+        for query, expected_sources in dataset:
+            relevant = expected_chunk_ids(index, expected_sources)
+            vector_queries.append((query, relevant))
+            bm25_queries.append((query, relevant))
+            hybrid_queries.append((query, relevant))
+            rerank_queries.append((query, relevant))
+
+        def vector_fn(query, top_k):
+            query_emb = tfidf_embed(query, index["vocab"], index["idf"])
+            return vector_search(query_emb, index["embeddings"], top_k=top_k)
+
+        def bm25_fn(query, top_k):
+            return index["bm25"].search(query, top_k=top_k)
+
+        def hybrid_fn(query, top_k):
+            return hybrid_search(
+                query,
+                index["chunks"],
+                index["embeddings"],
+                index["vocab"],
+                index["idf"],
+                index["bm25"],
+                top_k=top_k,
+                retrieval_pool=max(15, top_k * 3),
+            )
+
+        def rerank_fn(query, top_k):
+            pool = hybrid_search(
+                query,
+                index["chunks"],
+                index["embeddings"],
+                index["vocab"],
+                index["idf"],
+                index["bm25"],
+                top_k=max(15, top_k * 3),
+                retrieval_pool=max(15, top_k * 3),
+            )
+            return rerank(query, pool, index["chunks"])[:top_k]
+
+        metrics["vector"][k] = evaluate_retrieval_recall(vector_queries, vector_fn, k=k)[0]
+        metrics["bm25"][k] = evaluate_retrieval_recall(bm25_queries, bm25_fn, k=k)[0]
+        metrics["hybrid"][k] = evaluate_retrieval_recall(hybrid_queries, hybrid_fn, k=k)[0]
+        metrics["hybrid_rerank"][k] = evaluate_retrieval_recall(rerank_queries, rerank_fn, k=k)[0]
+
+    return metrics
+
+
+def render_recall_bars(metrics):
+    lines = []
+    for method, by_k in metrics.items():
+        for k, value in by_k.items():
+            bar = "#" * int(round(value * 20))
+            lines.append(f"{method:<14s} Recall@{k:<2d} {value:.2f} {bar}")
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":
@@ -592,3 +836,64 @@ if __name__ == "__main__":
     print("    - Replace HyDE templates with actual LLM hypothesis generation")
     print("    - Add metadata filtering before search")
     print("    - Evaluate with Recall@k and faithfulness on a test set")
+
+    print("\n" + "=" * 65)
+    print("EXERCISE SOLUTIONS 1-5")
+    print("=" * 65)
+
+    exercise_index = build_sample_index(chunk_size=50, overlap=10)
+
+    print("\n  Exercise 1: BM25 vs vector vs hybrid top-1")
+    comparison_rows = compare_retrievers_on_test_queries(exercise_index)
+    wins = count_top1_wins(comparison_rows)
+    for row in comparison_rows:
+        print(
+            f"    expected={row['expected']:<8s} "
+            f"vector={row['vector']:<8s} bm25={row['bm25']:<8s} "
+            f"hybrid={row['hybrid']:<8s} | {row['query']}"
+        )
+    print(f"    wins: {wins}")
+
+    print("\n  Exercise 2: Metadata filter")
+    security_results = metadata_filtered_vector_search(
+        "What encryption is used?",
+        exercise_index["embeddings"],
+        exercise_index["vocab"],
+        exercise_index["idf"],
+        exercise_index["metadata"],
+        filters={"category": "security"},
+        top_k=3,
+    )
+    searched_categories = {
+        exercise_index["metadata"][idx]["category"]
+        for idx, _ in security_results
+    }
+    print(f"    returned categories: {sorted(searched_categories)}")
+
+    print("\n  Exercise 3: Direct query vs HyDE top-3")
+    hyde_rows = compare_direct_vs_hyde(exercise_index, top_k=3)
+    for row in hyde_rows:
+        print(
+            f"    direct_hit={str(row['direct_hit']):<5s} "
+            f"hyde_hit={str(row['hyde_hit']):<5s} | {row['query']}"
+        )
+
+    print("\n  Exercise 4: Parent-child chunking")
+    parent_contexts = parent_child_search_context(
+        " ".join(SAMPLE_DOCUMENTS),
+        "enterprise refund 60 days",
+        parent_size=100,
+        child_size=30,
+        top_k=3,
+    )
+    for item in parent_contexts[:2]:
+        print(
+            f"    child #{item['child_id']} -> parent #{item['parent_id']} "
+            f"score={item['score']:.4f}"
+        )
+        print(f"      child: {item['child'][:90]}...")
+        print(f"      parent: {item['parent'][:90]}...")
+
+    print("\n  Exercise 5: Recall@k evaluation")
+    recall_metrics = evaluate_advanced_retrievers(exercise_index)
+    print(render_recall_bars(recall_metrics))
