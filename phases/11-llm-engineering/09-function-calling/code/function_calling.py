@@ -57,6 +57,50 @@ def get_weather(city, units="celsius"):
     data["city"] = city
     return data
 
+DB_TABLES = {
+    "user_salary": [
+        {"name": "Alice", "salary": 2500},
+        {"name": "Bob", "salary": 1200},
+        {"name": "Carla", "salary": 900},
+    ]
+}
+
+ALLOWED_OPS = {"=", ">", "<", ">=", "<="}
+
+def query_database_salaries(table, filters_conditions, limit=10):
+    if table not in DB_TABLES:
+        return {"error": True, "message": "Table not allowed"}
+
+    rows = DB_TABLES[table]
+
+    for condition in filters_conditions:
+        field = condition["field"]
+        op = condition["op"]
+        value = condition["value"]
+
+        if op not in ALLOWED_OPS:
+            return {"error": True, "message": "Operator not allowed"}
+
+        if field not in rows[0]:
+            return {"error": True, "message": "Field not allowed"}
+
+        if op == "=":
+            rows = [row for row in rows if row[field] == value]
+        elif op == ">":
+            rows = [row for row in rows if row[field] > value]
+        elif op == "<":
+            rows = [row for row in rows if row[field] < value]
+        elif op == ">=":
+            rows = [row for row in rows if row[field] >= value]
+        elif op == "<=":
+            rows = [row for row in rows if row[field] <= value]
+
+    return {
+        "table": table,
+        "rows": rows[:limit],
+        "count": len(rows[:limit]),
+    }
+
 
 SEARCH_DB = {
     "python function calling": [
@@ -142,6 +186,31 @@ def register_all_tools():
             "required": ["expression"],
         },
         calculator,
+    )
+    register_tool(
+        "get_salaries",
+        "Retrieve salary information for users based on specified criteria., Use only operators '=', '>', '<', '>=', '<=' for filtering. Returns a list of users with their salaries.",
+        {
+            "type": "object",
+            "properties": {
+                "table": {"type": "string", "description": "Allowed table name, e.g. 'user_salary'"},
+                "filters_conditions": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "field": {"type": "string", "description": "Field to filter on"},
+                            "op": {"type": "string", "description": "Comparison operators =, >, <, >=, <="},
+                            "value": {"type": "number", "description": "Value to compare against"},
+                        },
+                        "required": ["field", "op", "value"],
+                    },
+                },
+                "limit": {"type": "integer", "description": "Maximum number of results to return", "default": 10},
+            },
+            "required": ["table", "filters_conditions"],
+        },
+        query_database_salaries,
     )
     register_tool(
         "get_weather",
@@ -235,8 +304,12 @@ def simulate_model_decision(user_message, tools, conversation_history):
                 return [{"name": "read_file", "arguments": {"path": path}}]
         return [{"name": "read_file", "arguments": {"path": "README.md"}}]
 
+    if any(word in msg for word in ["salary", "pay", "wage"]):
+        return [{"name": "get_salaries", "arguments": {"table": "user_salary", "filters_conditions": [{"field": "salary", "op": ">", "value": 1000}], "limit": 5}}]
+    
     if any(word in msg for word in ["run", "execute", "code", "python"]):
         return [{"name": "run_code", "arguments": {"code": "result = 'Hello from the sandbox!'", "language": "python"}}]
+    
 
     return []
 
@@ -358,6 +431,7 @@ def run_demo():
         ("get_weather", {"city": "Tokyo", "units": "kelvin"}, "Invalid enum value"),
         ("calculator", {"expression": 123}, "Wrong type (int for string)"),
         ("unknown_tool", {"x": 1}, "Unknown tool"),
+        ("get_salaries", {"table": "user_salary", "filters_conditions": [{"field": "salary", "op": ">", "value": 1000}]}, "Valid call"),
     ]
     for tool_name, args, label in validation_tests:
         errors = validate_tool_arguments(tool_name, args)
@@ -369,6 +443,7 @@ def run_demo():
         {"name": "calculator", "arguments": {"expression": "(10 + 5) * 3 / 2"}},
         {"name": "get_weather", "arguments": {"city": "Tokyo"}},
         {"name": "get_weather", "arguments": {"city": "Mars"}},
+       {"name": "get_salaries", "arguments": {"table":"user_salary",  "filters_conditions": [{"field": "salary", "op": ">", "value": 1000}], "limit": 5}},
         {"name": "web_search", "arguments": {"query": "python function calling"}},
         {"name": "read_file", "arguments": {"path": "data/config.json"}},
         {"name": "read_file", "arguments": {"path": "../etc/passwd"}},
@@ -389,6 +464,7 @@ def run_demo():
         "Read the config file",
         "Run some Python code",
         "Tell me a joke",
+        "Who has a salary greater than 1000?",
     ]
     for query in test_queries:
         print(f"\n  User: {query}")
